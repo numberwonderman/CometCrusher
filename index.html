@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CometCrusher Core</title>
+    <title>CometCrusher: Sentinels of the Void</title>
     <style>
         body { margin: 0; background: #050510; overflow: hidden; color: #7fffd4; font-family: 'Courier New', Courier, monospace; }
         canvas { display: block; filter: drop-shadow(0 0 5px #00f2ff); }
@@ -12,7 +12,7 @@
 <body>
     <div id="ui">
         <h1>COMET CRUSHER</h1>
-        <p>Score: <span id="score">0</span></p>
+        <p>Score: <span id="score">0</span> | Lives: <span id="lives">3</span></p>
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -20,19 +20,27 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// --- Physics Constants ---
+// --- Constants ---
 const FPS = 60;
-const FRICTION = 0.99; // Space friction
+const FRICTION = 0.99;
 const SHIP_THRUST = 0.15;
-const SHIP_TURN_SPEED = 360; // Degrees per second
+const SHIP_TURN_SPEED = 360;
 const BULLET_SPEED = 7;
 const MAX_BULLETS = 10;
+const ALIEN_SPEED = 1.5;
 
-// --- Math Helpers ---
+const ANCIENT_ECHOES = [
+    "They were left to guard the silence.",
+    "The Sentinels do not sleep.",
+    "Frozen eyes watch the void.",
+    "Do not wake the sleeping king."
+];
+
 const toRad = (deg) => deg * Math.PI / 180;
 
 class Vector {
@@ -46,31 +54,48 @@ let ship = {
     pos: new Vector(canvas.width / 2, canvas.height / 2),
     vel: new Vector(0, 0),
     r: 15,
-    angle: 90, // Degrees
+    angle: 90,
     thrusting: false,
-    rotating: 0 // -1 for left, 1 for right
+    rotating: 0,
+    lives: 3
 };
 
 let bullets = [];
 let comets = [];
+let rings = [];
+let aliens = [];
 let score = 0;
+let currentMemory = { text: "", alpha: 0 };
+let lastAlienSpawn = Date.now();
 
 function createComet(x, y, r) {
     return {
         pos: new Vector(x, y),
         vel: new Vector((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3),
         r: r,
-        vertices: Math.floor(Math.random() * 5 + 7), // Geometric "frozen" look
+        vertices: Math.floor(Math.random() * 5 + 7),
         offsets: Array.from({length: 12}, () => Math.random() * 0.4 + 0.8)
     };
 }
 
-// Initial Comets
-for (let i = 0; i < 5; i++) {
-    comets.push(createComet(Math.random() * canvas.width, Math.random() * canvas.height, 40));
+function spawnAlien() {
+    aliens.push({
+        pos: new Vector(Math.random() > 0.5 ? 0 : canvas.width, Math.random() * canvas.height),
+        vel: new Vector(0, 0),
+        r: 12,
+        pulse: 0
+    });
 }
 
-// --- Input Handling ---
+function spawnRing() {
+    rings.push({ pos: new Vector(Math.random() * canvas.width, Math.random() * canvas.height), r: 50, pulse: 0 });
+}
+
+// Init
+for (let i = 0; i < 5; i++) comets.push(createComet(Math.random() * canvas.width, Math.random() * canvas.height, 40));
+spawnRing();
+
+// --- Input ---
 window.onkeydown = (e) => {
     if (e.key === 'ArrowUp' || e.key === 'w') ship.thrusting = true;
     if (e.key === 'ArrowLeft' || e.key === 'a') ship.rotating = -1;
@@ -86,18 +111,14 @@ function shoot() {
     if (bullets.length < MAX_BULLETS) {
         bullets.push({
             pos: new Vector(ship.pos.x, ship.pos.y),
-            vel: new Vector(
-                Math.cos(toRad(ship.angle)) * BULLET_SPEED,
-                -Math.sin(toRad(ship.angle)) * BULLET_SPEED
-            ),
-            life: 60 // frames
+            vel: new Vector(Math.cos(toRad(ship.angle)) * BULLET_SPEED, -Math.sin(toRad(ship.angle)) * BULLET_SPEED),
+            life: 60
         });
     }
 }
 
-// --- Core Loop ---
 function update() {
-    // 1. Rotation & Thrust
+    // Ship Movement
     ship.angle += ship.rotating * (SHIP_TURN_SPEED / FPS);
     if (ship.thrusting) {
         ship.vel.x += SHIP_THRUST * Math.cos(toRad(ship.angle));
@@ -106,69 +127,128 @@ function update() {
     ship.vel.mult(FRICTION);
     ship.pos.add(ship.vel);
 
-    // 2. Screen Wrap
-    [ship, ...bullets, ...comets].forEach(obj => {
+    // Alien Spawning & AI
+    if (Date.now() - lastAlienSpawn > 10000) { spawnAlien(); lastAlienSpawn = Date.now(); }
+    
+    aliens.forEach((a, ai) => {
+        // Simple Vector Pursuit
+        let dx = ship.pos.x - a.pos.x;
+        let dy = ship.pos.y - a.pos.y;
+        let dist = Math.hypot(dx, dy);
+        a.vel.x = (dx / dist) * ALIEN_SPEED;
+        a.vel.y = (dy / dist) * ALIEN_SPEED;
+        a.pos.add(a.vel);
+        a.pulse += 0.1;
+
+        // Ship-Alien Collision
+        if (dist < ship.r + a.r) {
+            aliens.splice(ai, 1);
+            ship.lives--;
+            livesEl.innerText = ship.lives;
+            if(ship.lives <= 0) alert("DEFEATED BY THE SENTINELS. FINAL SCORE: " + score);
+        }
+    });
+
+    // Bullets vs Aliens
+    bullets.forEach((b, bi) => {
+        aliens.forEach((a, ai) => {
+            if (Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) < a.r) {
+                bullets.splice(bi, 1);
+                aliens.splice(ai, 1);
+                score += 1000;
+                scoreEl.innerText = score;
+            }
+        });
+    });
+
+    // Screen Wrap
+    [ship, ...bullets, ...comets, ...rings, ...aliens].forEach(obj => {
         if (obj.pos.x < 0) obj.pos.x = canvas.width;
         if (obj.pos.x > canvas.width) obj.pos.x = 0;
         if (obj.pos.y < 0) obj.pos.y = canvas.height;
         if (obj.pos.y > canvas.height) obj.pos.y = 0;
     });
 
-    // 3. Bullets
-    bullets.forEach((b, i) => {
-        b.pos.add(b.vel);
-        b.life--;
-        if (b.life <= 0) bullets.splice(i, 1);
-    });
-
-    // 4. Comets & Collision
+    // Bullets & Comet logic
+    bullets.forEach((b, i) => { b.pos.add(b.vel); b.life--; if (b.life <= 0) bullets.splice(i, 1); });
     comets.forEach((c, ci) => {
         c.pos.add(c.vel);
-        
-        // Bullet Collision (Euclidean Distance)
         bullets.forEach((b, bi) => {
-            let dist = Math.hypot(b.pos.x - c.pos.x, b.pos.y - c.pos.y);
-            if (dist < c.r) {
+            if (Math.hypot(b.pos.x - c.pos.x, b.pos.y - c.pos.y) < c.r) {
                 bullets.splice(bi, 1);
-                if (c.r > 15) {
-                    comets.push(createComet(c.pos.x, c.pos.y, c.r / 2));
-                    comets.push(createComet(c.pos.x, c.pos.y, c.r / 2));
-                }
+                if (c.r > 15) { comets.push(createComet(c.pos.x, c.pos.y, c.r / 2)); comets.push(createComet(c.pos.x, c.pos.y, c.r / 2)); }
                 comets.splice(ci, 1);
                 score += 100;
                 scoreEl.innerText = score;
             }
         });
+        if(Math.hypot(ship.pos.x - c.pos.x, ship.pos.y - c.pos.y) < ship.r + c.r) {
+             // Basic collision penalty
+             ship.vel.mult(-1); 
+        }
     });
+
+    // Rings
+    rings.forEach((r, ri) => {
+        r.pulse += 0.05;
+        if (Math.hypot(ship.pos.x - r.pos.x, ship.pos.y - r.pos.y) < r.r) {
+            rings.splice(ri, 1);
+            currentMemory.text = ANCIENT_ECHOES[Math.floor(Math.random() * ANCIENT_ECHOES.length)];
+            currentMemory.alpha = 2.0;
+            spawnRing();
+        }
+    });
+
+    if (currentMemory.alpha > 0) currentMemory.alpha -= 0.005;
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw Ship
-    ctx.strokeStyle = '#00f2ff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(
-        ship.pos.x + 4/3 * ship.r * Math.cos(toRad(ship.angle)),
-        ship.pos.y - 4/3 * ship.r * Math.sin(toRad(ship.angle))
-    );
-    ctx.lineTo(
-        ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) + Math.sin(toRad(ship.angle))),
-        ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) - Math.cos(toRad(ship.angle)))
-    );
-    ctx.lineTo(
-        ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) - Math.sin(toRad(ship.angle))),
-        ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) + Math.cos(toRad(ship.angle)))
-    );
-    ctx.closePath();
-    ctx.stroke();
+    // Background Memory
+    if (currentMemory.alpha > 0) {
+        ctx.fillStyle = `rgba(127, 255, 212, ${Math.min(currentMemory.alpha, 1)})`;
+        ctx.font = "italic 24px 'Courier New'"; ctx.textAlign = "center";
+        ctx.fillText(currentMemory.text, canvas.width / 2, canvas.height / 2);
+    }
 
-    // Draw Bullets
+    // Draw Aliens (Sentinels)
+    aliens.forEach(a => {
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let s = a.r + Math.sin(a.pulse) * 3; // Pulsing size
+        ctx.moveTo(a.pos.x, a.pos.y - s);
+        ctx.lineTo(a.pos.x + s, a.pos.y);
+        ctx.lineTo(a.pos.x, a.pos.y + s);
+        ctx.lineTo(a.pos.x - s, a.pos.y);
+        ctx.closePath();
+        ctx.stroke();
+        // Inner core
+        ctx.fillStyle = `rgba(255, 0, 85, ${0.5 + Math.sin(a.pulse) * 0.5})`;
+        ctx.beginPath(); ctx.arc(a.pos.x, a.pos.y, 4, 0, Math.PI*2); ctx.fill();
+    });
+
+    // Draw Rings
+    rings.forEach(r => {
+        ctx.strokeStyle = `rgba(0, 242, 255, ${0.4 + Math.sin(r.pulse) * 0.2})`;
+        ctx.lineWidth = 3; ctx.setLineDash([5, 15]);
+        ctx.beginPath(); ctx.arc(r.pos.x, r.pos.y, r.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+    });
+
+    // Ship
+    ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(ship.pos.x + 4/3 * ship.r * Math.cos(toRad(ship.angle)), ship.pos.y - 4/3 * ship.r * Math.sin(toRad(ship.angle)));
+    ctx.lineTo(ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) + Math.sin(toRad(ship.angle))), ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) - Math.cos(toRad(ship.angle))));
+    ctx.lineTo(ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) - Math.sin(toRad(ship.angle))), ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) + Math.cos(toRad(ship.angle))));
+    ctx.closePath(); ctx.stroke();
+
+    // Bullets
     ctx.fillStyle = '#ff00ff';
     bullets.forEach(b => ctx.fillRect(b.pos.x, b.pos.y, 3, 3));
 
-    // Draw Comets
+    // Comets
     ctx.strokeStyle = '#7fffd4';
     comets.forEach(c => {
         ctx.beginPath();
@@ -177,14 +257,10 @@ function draw() {
             let r = c.r * c.offsets[i];
             ctx.lineTo(c.pos.x + r * Math.cos(a), c.pos.y + r * Math.sin(a));
         }
-        ctx.closePath();
-        ctx.stroke();
+        ctx.closePath(); ctx.stroke();
     });
 
-    requestAnimationFrame(() => {
-        update();
-        draw();
-    });
+    requestAnimationFrame(() => { update(); draw(); });
 }
 
 draw();
