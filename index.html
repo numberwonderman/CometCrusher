@@ -2,17 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CometCrusher: Sentinels of the Void</title>
+    <title>CometCrusher: Rayon Betrayal</title>
     <style>
         body { margin: 0; background: #050510; overflow: hidden; color: #7fffd4; font-family: 'Courier New', Courier, monospace; }
         canvas { display: block; filter: drop-shadow(0 0 5px #00f2ff); }
-        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 0 0 5px #00f2ff; }
     </style>
 </head>
 <body>
     <div id="ui">
         <h1>COMET CRUSHER</h1>
         <p>Score: <span id="score">0</span> | Lives: <span id="lives">3</span></p>
+        <p>Freeze Charges [F]: <span id="freeze">0</span></p>
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -21,26 +22,31 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const livesEl = document.getElementById('lives');
+const freezeEl = document.getElementById('freeze');
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// --- Constants ---
+// --- Physics Constants ---
 const FPS = 60;
 const FRICTION = 0.99;
 const SHIP_THRUST = 0.15;
 const SHIP_TURN_SPEED = 360;
 const BULLET_SPEED = 7;
 const MAX_BULLETS = 10;
-const ALIEN_SPEED = 1.5;
+const ALIEN_SPEED = 1.6;
 
+// --- Rayon Lore ---
 const ANCIENT_ECHOES = [
-    "They were left to guard the silence.",
-    "The Sentinels do not sleep.",
-    "Frozen eyes watch the void.",
-    "Do not wake the sleeping king."
+    "The Rayons built the gates to catch the light.",
+    "The Iron Star shrank, and the warmth fled.",
+    "In the cold, our Sentinels recalibrated... and betrayed us.",
+    "Betrayal is a cold equation. They chose the frost.",
+    "You fly through the ribs of a ghost empire.",
+    "The Sentinels guard a heat that no longer exists."
 ];
 
+// --- Math Helpers ---
 const toRad = (deg) => deg * Math.PI / 180;
 
 class Vector {
@@ -65,7 +71,9 @@ let comets = [];
 let rings = [];
 let aliens = [];
 let score = 0;
-let currentMemory = { text: "", alpha: 0 };
+let freezeCharges = 0;
+let freezeTimer = 0; // Duration of active freeze
+let currentMemory = { text: "The frost is coming...", alpha: 1.5 };
 let lastAlienSpawn = Date.now();
 
 function createComet(x, y, r) {
@@ -91,16 +99,17 @@ function spawnRing() {
     rings.push({ pos: new Vector(Math.random() * canvas.width, Math.random() * canvas.height), r: 50, pulse: 0 });
 }
 
-// Init
+// Initial Setup
 for (let i = 0; i < 5; i++) comets.push(createComet(Math.random() * canvas.width, Math.random() * canvas.height, 40));
 spawnRing();
 
-// --- Input ---
+// --- Input Handling ---
 window.onkeydown = (e) => {
     if (e.key === 'ArrowUp' || e.key === 'w') ship.thrusting = true;
     if (e.key === 'ArrowLeft' || e.key === 'a') ship.rotating = -1;
     if (e.key === 'ArrowRight' || e.key === 'd') ship.rotating = 1;
     if (e.key === ' ') shoot();
+    if (e.key === 'f' || e.key === 'F') useFreeze();
 };
 window.onkeyup = (e) => {
     if (e.key === 'ArrowUp' || e.key === 'w') ship.thrusting = false;
@@ -117,8 +126,17 @@ function shoot() {
     }
 }
 
+function useFreeze() {
+    if (freezeCharges > 0 && freezeTimer <= 0) {
+        freezeCharges--;
+        freezeTimer = 180; // 3 seconds at 60fps
+        freezeEl.innerText = freezeCharges;
+    }
+}
+
+// --- Core Loop ---
 function update() {
-    // Ship Movement
+    // 1. Ship Physics
     ship.angle += ship.rotating * (SHIP_TURN_SPEED / FPS);
     if (ship.thrusting) {
         ship.vel.x += SHIP_THRUST * Math.cos(toRad(ship.angle));
@@ -127,30 +145,37 @@ function update() {
     ship.vel.mult(FRICTION);
     ship.pos.add(ship.vel);
 
-    // Alien Spawning & AI
+    if (freezeTimer > 0) freezeTimer--;
+
+    // 2. Alien (Sentinel) AI
     if (Date.now() - lastAlienSpawn > 10000) { spawnAlien(); lastAlienSpawn = Date.now(); }
     
     aliens.forEach((a, ai) => {
-        // Simple Vector Pursuit
         let dx = ship.pos.x - a.pos.x;
         let dy = ship.pos.y - a.pos.y;
         let dist = Math.hypot(dx, dy);
-        a.vel.x = (dx / dist) * ALIEN_SPEED;
-        a.vel.y = (dy / dist) * ALIEN_SPEED;
-        a.pos.add(a.vel);
+
+        if (freezeTimer <= 0) {
+            a.vel.x = (dx / dist) * ALIEN_SPEED;
+            a.vel.y = (dy / dist) * ALIEN_SPEED;
+            a.pos.add(a.vel);
+        }
         a.pulse += 0.1;
 
-        // Ship-Alien Collision
         if (dist < ship.r + a.r) {
             aliens.splice(ai, 1);
             ship.lives--;
             livesEl.innerText = ship.lives;
-            if(ship.lives <= 0) alert("DEFEATED BY THE SENTINELS. FINAL SCORE: " + score);
+            if(ship.lives <= 0) { alert("THE ICE HAS CONSUMED YOU. SCORE: " + score); location.reload(); }
         }
     });
 
-    // Bullets vs Aliens
+    // 3. Bullets vs Everything
     bullets.forEach((b, bi) => {
+        b.pos.add(b.vel);
+        b.life--;
+        if (b.life <= 0) bullets.splice(bi, 1);
+
         aliens.forEach((a, ai) => {
             if (Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) < a.r) {
                 bullets.splice(bi, 1);
@@ -161,42 +186,44 @@ function update() {
         });
     });
 
-    // Screen Wrap
-    [ship, ...bullets, ...comets, ...rings, ...aliens].forEach(obj => {
-        if (obj.pos.x < 0) obj.pos.x = canvas.width;
-        if (obj.pos.x > canvas.width) obj.pos.x = 0;
-        if (obj.pos.y < 0) obj.pos.y = canvas.height;
-        if (obj.pos.y > canvas.height) obj.pos.y = 0;
-    });
-
-    // Bullets & Comet logic
-    bullets.forEach((b, i) => { b.pos.add(b.vel); b.life--; if (b.life <= 0) bullets.splice(i, 1); });
+    // 4. Comet Physics & Collision
     comets.forEach((c, ci) => {
-        c.pos.add(c.vel);
+        if (freezeTimer <= 0) c.pos.add(c.vel);
         bullets.forEach((b, bi) => {
             if (Math.hypot(b.pos.x - c.pos.x, b.pos.y - c.pos.y) < c.r) {
                 bullets.splice(bi, 1);
-                if (c.r > 15) { comets.push(createComet(c.pos.x, c.pos.y, c.r / 2)); comets.push(createComet(c.pos.x, c.pos.y, c.r / 2)); }
+                if (c.r > 15) {
+                    comets.push(createComet(c.pos.x, c.pos.y, c.r / 2));
+                    comets.push(createComet(c.pos.x, c.pos.y, c.r / 2));
+                }
                 comets.splice(ci, 1);
                 score += 100;
                 scoreEl.innerText = score;
             }
         });
-        if(Math.hypot(ship.pos.x - c.pos.x, ship.pos.y - c.pos.y) < ship.r + c.r) {
-             // Basic collision penalty
-             ship.vel.mult(-1); 
-        }
     });
 
-    // Rings
+    // 5. Ring Collision & Powerup
     rings.forEach((r, ri) => {
         r.pulse += 0.05;
         if (Math.hypot(ship.pos.x - r.pos.x, ship.pos.y - r.pos.y) < r.r) {
             rings.splice(ri, 1);
             currentMemory.text = ANCIENT_ECHOES[Math.floor(Math.random() * ANCIENT_ECHOES.length)];
             currentMemory.alpha = 2.0;
+            freezeCharges++;
+            freezeEl.innerText = freezeCharges;
+            score += 500;
+            scoreEl.innerText = score;
             spawnRing();
         }
+    });
+
+    // 6. Screen Wrap
+    [ship, ...bullets, ...comets, ...rings, ...aliens].forEach(obj => {
+        if (obj.pos.x < 0) obj.pos.x = canvas.width;
+        if (obj.pos.x > canvas.width) obj.pos.x = 0;
+        if (obj.pos.y < 0) obj.pos.y = canvas.height;
+        if (obj.pos.y > canvas.height) obj.pos.y = 0;
     });
 
     if (currentMemory.alpha > 0) currentMemory.alpha -= 0.005;
@@ -205,28 +232,27 @@ function update() {
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Background Memory
+    // Draw Iron Star (Dead Sun)
+    ctx.fillStyle = "#ff4444";
+    ctx.beginPath();
+    ctx.arc(canvas.width/2, canvas.height/2, 2, 0, Math.PI*2);
+    ctx.fill();
+
+    // Memory Text
     if (currentMemory.alpha > 0) {
         ctx.fillStyle = `rgba(127, 255, 212, ${Math.min(currentMemory.alpha, 1)})`;
         ctx.font = "italic 24px 'Courier New'"; ctx.textAlign = "center";
-        ctx.fillText(currentMemory.text, canvas.width / 2, canvas.height / 2);
+        ctx.fillText(currentMemory.text, canvas.width / 2, canvas.height / 2 + 100);
     }
 
     // Draw Aliens (Sentinels)
     aliens.forEach(a => {
-        ctx.strokeStyle = '#ff0055';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        let s = a.r + Math.sin(a.pulse) * 3; // Pulsing size
-        ctx.moveTo(a.pos.x, a.pos.y - s);
-        ctx.lineTo(a.pos.x + s, a.pos.y);
-        ctx.lineTo(a.pos.x, a.pos.y + s);
-        ctx.lineTo(a.pos.x - s, a.pos.y);
-        ctx.closePath();
-        ctx.stroke();
-        // Inner core
-        ctx.fillStyle = `rgba(255, 0, 85, ${0.5 + Math.sin(a.pulse) * 0.5})`;
-        ctx.beginPath(); ctx.arc(a.pos.x, a.pos.y, 4, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = freezeTimer > 0 ? '#44ffff' : '#ff0055';
+        ctx.lineWidth = 2; ctx.beginPath();
+        let s = a.r + Math.sin(a.pulse) * 3;
+        ctx.moveTo(a.pos.x, a.pos.y - s); ctx.lineTo(a.pos.x + s, a.pos.y);
+        ctx.lineTo(a.pos.x, a.pos.y + s); ctx.lineTo(a.pos.x - s, a.pos.y);
+        ctx.closePath(); ctx.stroke();
     });
 
     // Draw Rings
@@ -237,18 +263,16 @@ function draw() {
         ctx.setLineDash([]);
     });
 
-    // Ship
-    ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 2; ctx.beginPath();
+    // Draw Ship
+    ctx.strokeStyle = freezeTimer > 0 ? '#ffffff' : '#00f2ff';
+    ctx.lineWidth = 2; ctx.beginPath();
     ctx.moveTo(ship.pos.x + 4/3 * ship.r * Math.cos(toRad(ship.angle)), ship.pos.y - 4/3 * ship.r * Math.sin(toRad(ship.angle)));
     ctx.lineTo(ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) + Math.sin(toRad(ship.angle))), ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) - Math.cos(toRad(ship.angle))));
     ctx.lineTo(ship.pos.x - ship.r * (2/3 * Math.cos(toRad(ship.angle)) - Math.sin(toRad(ship.angle))), ship.pos.y + ship.r * (2/3 * Math.sin(toRad(ship.angle)) + Math.cos(toRad(ship.angle))));
     ctx.closePath(); ctx.stroke();
 
-    // Bullets
-    ctx.fillStyle = '#ff00ff';
-    bullets.forEach(b => ctx.fillRect(b.pos.x, b.pos.y, 3, 3));
-
-    // Comets
+    // Bullets & Comets
+    ctx.fillStyle = '#ff00ff'; bullets.forEach(b => ctx.fillRect(b.pos.x, b.pos.y, 3, 3));
     ctx.strokeStyle = '#7fffd4';
     comets.forEach(c => {
         ctx.beginPath();
